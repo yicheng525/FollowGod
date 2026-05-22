@@ -37,8 +37,11 @@ def _render_page(
 ) -> str:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     portfolio = _portfolio_section(latest)
-    changes = _changes_section(latest)
+    added = _change_section(latest, "added")
+    increased = _change_section(latest, "increased")
+    reduced = _change_section(latest, "reduced")
     filing_cards = "".join(_filing_card(filing) for filing in filings)
+    metrics = _metrics_section(latest, filings)
     empty = ""
     if not filings:
         empty = """
@@ -69,7 +72,7 @@ def _render_page(
         position: sticky;
         top: 0;
         z-index: 2;
-        padding: 18px 16px 14px;
+        padding: 18px 16px 12px;
         background: rgba(8, 11, 18, 0.94);
         border-bottom: 1px solid #1f2937;
         backdrop-filter: blur(14px);
@@ -90,6 +93,32 @@ def _render_page(
         gap: 8px;
         flex-wrap: wrap;
       }}
+      .tabs {{
+        display: flex;
+        gap: 6px;
+        margin-top: 14px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }}
+      .tabs::-webkit-scrollbar {{
+        display: none;
+      }}
+      .tab {{
+        appearance: none;
+        border: 1px solid #344054;
+        border-radius: 999px;
+        background: #111827;
+        color: #cbd5e1;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 11px;
+        white-space: nowrap;
+      }}
+      .tab.active {{
+        border-color: #34d399;
+        background: #123027;
+        color: #d1fae5;
+      }}
       .pill {{
         border: 1px solid #344054;
         border-radius: 999px;
@@ -97,6 +126,12 @@ def _render_page(
         font-size: 12px;
         padding: 5px 9px;
         background: #111827;
+      }}
+      .tab-panel {{
+        display: none;
+      }}
+      .tab-panel.active {{
+        display: block;
       }}
       .section-title {{
         display: flex;
@@ -119,6 +154,28 @@ def _render_page(
         display: grid;
         gap: 10px;
       }}
+      .metrics {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin: 14px 0 4px;
+      }}
+      .metric {{
+        border: 1px solid #253044;
+        border-radius: 8px;
+        background: #101722;
+        padding: 12px;
+      }}
+      .metric-label {{
+        color: #94a3b8;
+        font-size: 12px;
+      }}
+      .metric-value {{
+        margin-top: 4px;
+        color: #f8fafc;
+        font-size: 20px;
+        font-weight: 800;
+      }}
       article {{
         border: 1px solid #253044;
         border-radius: 8px;
@@ -130,6 +187,24 @@ def _render_page(
         grid-template-columns: 1fr auto;
         gap: 8px;
         align-items: start;
+      }}
+      .bar {{
+        height: 6px;
+        border-radius: 999px;
+        background: #1f2937;
+        margin-top: 10px;
+        overflow: hidden;
+      }}
+      .bar-fill {{
+        height: 100%;
+        border-radius: 999px;
+        background: #34d399;
+      }}
+      .position-card.put .bar-fill {{
+        background: #fb7185;
+      }}
+      .position-card.call .bar-fill {{
+        background: #60a5fa;
       }}
       .name, .issuer {{
         color: #f8fafc;
@@ -157,6 +232,28 @@ def _render_page(
       }}
       .change.reduced {{
         color: #fb7185;
+      }}
+      .badge {{
+        display: inline-block;
+        border: 1px solid #344054;
+        border-radius: 999px;
+        padding: 2px 7px;
+        margin-right: 5px;
+        color: #cbd5e1;
+        font-size: 11px;
+        font-weight: 700;
+      }}
+      .badge.long {{
+        border-color: #047857;
+        color: #86efac;
+      }}
+      .badge.put {{
+        border-color: #be123c;
+        color: #fda4af;
+      }}
+      .badge.call {{
+        border-color: #2563eb;
+        color: #93c5fd;
       }}
       .change.unchanged {{
         color: #94a3b8;
@@ -191,20 +288,75 @@ def _render_page(
         <span class="pill">{len(filings)} filings</span>
         <span class="pill">Updated {generated_at}</span>
       </div>
+      <nav class="tabs" aria-label="Dashboard tabs">
+        <button class="tab active" data-tab="portfolio">持倉</button>
+        <button class="tab" data-tab="added">新增</button>
+        <button class="tab" data-tab="increased">增加</button>
+        <button class="tab" data-tab="reduced">減少</button>
+        <button class="tab" data-tab="filings">Filings</button>
+      </nav>
     </header>
     <main>
       {empty}
-      {portfolio}
-      {changes}
-      <div class="section-title">
-        <h2>Filings</h2>
-        <span>Source documents</span>
-      </div>
-      <section class="feed">{filing_cards}</section>
+      {metrics}
+      <section class="tab-panel active" data-panel="portfolio">{portfolio}</section>
+      <section class="tab-panel" data-panel="added">{added}</section>
+      <section class="tab-panel" data-panel="increased">{increased}</section>
+      <section class="tab-panel" data-panel="reduced">{reduced}</section>
+      <section class="tab-panel" data-panel="filings">
+        <div class="section-title">
+          <h2>Filings</h2>
+          <span>Source documents</span>
+        </div>
+        <div class="feed">{filing_cards}</div>
+      </section>
     </main>
+    <script>
+      const tabs = Array.from(document.querySelectorAll(".tab"));
+      const panels = Array.from(document.querySelectorAll(".tab-panel"));
+      function activateTab(name) {{
+        tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === name));
+        panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === name));
+      }}
+      tabs.forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
+    </script>
   </body>
 </html>
 """
+
+
+def _metrics_section(
+    latest: dict[str, object] | None,
+    filings: list[dict[str, object]],
+) -> str:
+    if latest is None:
+        return ""
+    accession = str(latest.get("accession_number") or "")
+    holdings = _holdings_with_changes(accession)
+    total_value = int(latest.get("holdings_total_value") or 0)
+    added = len([holding for holding in holdings if holding.get("change") == "NEW"])
+    increased = len([holding for holding in holdings if str(holding.get("change") or "").startswith("INCREASED")])
+    reduced = len([holding for holding in holdings if str(holding.get("change") or "").startswith("REDUCED")])
+    return f"""
+    <section class="metrics">
+      <div class="metric">
+        <div class="metric-label">Reported value</div>
+        <div class="metric-value">{_money(total_value)}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Rows</div>
+        <div class="metric-value">{len(holdings)}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">New / Up / Down</div>
+        <div class="metric-value">{added} / {increased} / {reduced}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Filings</div>
+        <div class="metric-value">{len(filings)}</div>
+      </div>
+    </section>
+    """
 
 
 def _portfolio_section(filing: dict[str, object] | None) -> str:
@@ -213,7 +365,7 @@ def _portfolio_section(filing: dict[str, object] | None) -> str:
     accession = str(filing.get("accession_number") or "")
     holdings = _holdings_with_changes(accession)
     total_value = int(filing.get("holdings_total_value") or 0)
-    rows = "".join(_position_card(holding, total_value) for holding in holdings[:18])
+    rows = "".join(_position_card(holding, total_value) for holding in holdings[:30])
     return f"""
     <div class="section-title">
       <h2>Latest Portfolio</h2>
@@ -223,27 +375,35 @@ def _portfolio_section(filing: dict[str, object] | None) -> str:
     """
 
 
-def _changes_section(filing: dict[str, object] | None) -> str:
+def _change_section(filing: dict[str, object] | None, mode: str) -> str:
     if filing is None:
         return ""
     accession = str(filing.get("accession_number") or "")
     holdings = _holdings_with_changes(accession)
-    notable = sorted(
-        [
-            holding
-            for holding in holdings
-            if str(holding.get("change") or "").startswith(("NEW", "INCREASED", "REDUCED"))
-        ],
-        key=_change_sort_key,
-    )[:18]
+    if mode == "added":
+        title = "新增"
+        subtitle = "New rows versus previous 13F"
+        filtered = [holding for holding in holdings if holding.get("change") == "NEW"]
+    elif mode == "increased":
+        title = "增加"
+        subtitle = "Increased rows versus previous 13F"
+        filtered = [holding for holding in holdings if str(holding.get("change") or "").startswith("INCREASED")]
+    else:
+        title = "減少"
+        subtitle = "Reduced rows versus previous 13F"
+        filtered = [holding for holding in holdings if str(holding.get("change") or "").startswith("REDUCED")]
+
+    notable = sorted(filtered, key=_change_sort_key)
     rows = "".join(
         _position_card(holding, int(filing.get("holdings_total_value") or 0), show_change=True)
         for holding in notable
     )
+    if not rows:
+        rows = '<article><div class="subtext">No rows in this category.</div></article>'
     return f"""
     <div class="section-title">
-      <h2>Latest Changes</h2>
-      <span>Compared with previous 13F</span>
+      <h2>{title}</h2>
+      <span>{subtitle}</span>
     </div>
     <section class="grid">{rows}</section>
     """
@@ -259,18 +419,21 @@ def _position_card(
     change = str(holding.get("change") or "")
     change_html = f'<span class="change {_change_class(change)}">{_escape(change)}</span>' if show_change else ""
     exposure_type = holding.get("put_call") or "Long"
+    exposure_class = str(exposure_type).lower()
+    bar_width = max(1.5, min(100, percent))
     return f"""
-    <article>
+    <article class="position-card {exposure_class}">
       <div class="position-top">
         <div class="name">{_escape(str(holding.get("name_of_issuer") or ""))}</div>
         <div class="value">{_money(value)}</div>
       </div>
       <div class="subtext">
+        <span class="badge {exposure_class}">{exposure_type}</span>
         {percent:.1f}% / {int(holding.get("shares_or_principal") or 0):,} {holding.get("share_type") or ""}
-        / {exposure_type}
         / CUSIP {_escape(str(holding.get("cusip") or ""))}
         {change_html}
       </div>
+      <div class="bar"><div class="bar-fill" style="width: {bar_width:.2f}%"></div></div>
     </article>
     """
 
