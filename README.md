@@ -130,7 +130,7 @@ The repository includes `.github/workflows/sec-check.yml`.
 It runs:
 
 - manually via `workflow_dispatch`
-- automatically every 12 hours via cron
+- automatically every 3 hours via cron
 
 Add these GitHub repository secrets:
 
