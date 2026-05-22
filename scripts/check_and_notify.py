@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.notifier import build_filing_alert_message
 from app.service import PollService
 from app.storage import FilingStore
+from app.models import Filing
 
 
 DEFAULT_STATE_PATH = PROJECT_ROOT / "data" / "notified_accessions.json"
@@ -25,6 +26,11 @@ async def main() -> None:
     settings = get_settings()
     store = FilingStore(settings.database_path)
     service = PollService(settings, store)
+
+    if _truthy(os.getenv("FOLLOWGOD_SEND_TEST_ALERT")):
+        result = await _send_test_alert(service)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
 
     filings = await service.sec_client.fetch_recent_filings(settings.normalized_cik)
     store.insert_new(filings)
@@ -100,6 +106,48 @@ def _save_state(path: Path, state: dict[str, list[str]]) -> None:
     with path.open("w", encoding="utf-8") as file:
         json.dump(state, file, indent=2, ensure_ascii=False)
         file.write("\n")
+
+
+async def _send_test_alert(service: PollService) -> dict[str, object]:
+    filing = Filing(
+        cik=service.settings.normalized_cik,
+        entity_name=service.settings.target_name,
+        accession_number="TEST-TELEGRAM-ALERT",
+        form="TEST",
+        filing_date="N/A",
+        report_date="N/A",
+        accepted_at="manual test",
+        primary_document="test",
+    )
+    analysis = {
+        "status": "complete",
+        "summary": "這是一則 FollowGod Telegram 測試推播。如果你看到這則訊息，代表 Bot Token 和 Chat ID 設定正確。",
+        "importance": "low",
+        "key_points": [
+            "GitHub Actions 可以成功發送 Telegram 訊息。",
+            "之後若 SEC 有新 filing，系統會解析持倉並推送 AI 整理。",
+            "這則測試不會更新 notified_accessions state。",
+        ],
+    }
+    sent = False
+    error = None
+    try:
+        await service.notifier.send_filing_alert(filing, analysis)
+        sent = service.notifier.enabled
+        if not service.notifier.enabled:
+            error = "Telegram is not configured."
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+    return {
+        "mode": "test_alert",
+        "telegram_enabled": service.notifier.enabled,
+        "telegram_sent": sent,
+        "error": error,
+    }
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 if __name__ == "__main__":

@@ -2,6 +2,15 @@ name: SEC Check and Telegram Alert
 
 on:
   workflow_dispatch:
+    inputs:
+      send_test_alert:
+        description: "Send a Telegram test alert"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   push:
     branches:
       - main
@@ -30,6 +39,7 @@ jobs:
       FOLLOWGOD_OPENAI_MODEL: ${{ vars.FOLLOWGOD_OPENAI_MODEL || 'gpt-5-mini' }}
       FOLLOWGOD_TELEGRAM_BOT_TOKEN: ${{ secrets.FOLLOWGOD_TELEGRAM_BOT_TOKEN }}
       FOLLOWGOD_TELEGRAM_CHAT_ID: ${{ secrets.FOLLOWGOD_TELEGRAM_CHAT_ID }}
+      FOLLOWGOD_SEND_TEST_ALERT: ${{ github.event.inputs.send_test_alert || 'false' }}
 
     steps:
       - name: Checkout
