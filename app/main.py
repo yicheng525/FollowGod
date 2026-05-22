@@ -278,6 +278,13 @@ def _analysis_section(row: dict[str, str | None]) -> str:
     status = row.get("analysis_status")
     accession = row.get("accession_number") or ""
     if not status:
+        if not settings.openai_api_key:
+            return """
+            <div class="analysis pending">
+              <div class="analysis-title">AI analysis off</div>
+              <p>Set OPENAI_API_KEY in .env to enable filing summaries.</p>
+            </div>
+            """
         return f"""
         <div class="analysis pending">
           <div class="analysis-title">AI analysis pending</div>
@@ -286,6 +293,13 @@ def _analysis_section(row: dict[str, str | None]) -> str:
         """
     if status != "complete":
         error = row.get("analysis_error") or "No analysis is available."
+        if not settings.openai_api_key:
+            return f"""
+            <div class="analysis pending">
+              <div class="analysis-title">AI analysis off</div>
+              <p>{_escape(error)}</p>
+            </div>
+            """
         return f"""
         <div class="analysis pending">
           <div class="analysis-title">AI analysis {status}</div>
