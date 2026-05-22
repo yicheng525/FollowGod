@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: sec-check
@@ -54,3 +56,17 @@ jobs:
           git add data/notified_accessions.json
           git commit -m "Update notified SEC accessions"
           git push
+
+      - name: Build static dashboard
+        run: python scripts/build_static_dashboard.py
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload dashboard artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy dashboard to GitHub Pages
+        uses: actions/deploy-pages@v4

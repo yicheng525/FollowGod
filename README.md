@@ -154,6 +154,14 @@ data/notified_accessions.json
 
 Current historical filings are already seeded into that file so the first scheduled run does not spam old filings.
 
+The same workflow also builds and deploys a static dashboard to GitHub Pages. The deployed HTML contains only parsed SEC data, not API keys or Telegram credentials.
+
+Enable Pages in GitHub:
+
+```text
+Settings -> Pages -> Build and deployment -> Source: GitHub Actions
+```
+
 ## Useful API endpoints
 
 - `GET /health`
