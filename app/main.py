@@ -46,6 +46,9 @@ async def api_analyze(accession_number: str, force: bool = False) -> dict[str, o
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     filings = store.list_filings(limit=100)
+    latest_filing = _latest_filing_with_holdings(filings)
+    portfolio_overview = _portfolio_overview_section(latest_filing)
+    change_overview = _change_overview_section(latest_filing)
     rows = "\n".join(_filing_card(row) for row in filings)
     empty_state = ""
     if not rows:
@@ -127,6 +130,61 @@ def dashboard() -> str:
           .feed {{
             display: grid;
             gap: 10px;
+          }}
+          .section-title {{
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: end;
+            margin: 18px 0 10px;
+          }}
+          .section-title h2 {{
+            margin: 0;
+            font-size: 17px;
+            letter-spacing: 0;
+          }}
+          .section-title span {{
+            color: #94a3b8;
+            font-size: 12px;
+            text-align: right;
+          }}
+          .portfolio-grid {{
+            display: grid;
+            gap: 10px;
+          }}
+          .position-card {{
+            border: 1px solid #253044;
+            border-radius: 8px;
+            background: #101722;
+            padding: 13px;
+          }}
+          .position-top {{
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            align-items: start;
+          }}
+          .position-name {{
+            color: #f8fafc;
+            font-size: 14px;
+            font-weight: 750;
+            overflow-wrap: anywhere;
+          }}
+          .position-value {{
+            color: #c7d2fe;
+            font-size: 14px;
+            font-weight: 750;
+            white-space: nowrap;
+          }}
+          .position-meta {{
+            margin-top: 6px;
+            color: #94a3b8;
+            font-size: 12px;
+            line-height: 1.4;
+          }}
+          .change-grid {{
+            display: grid;
+            gap: 8px;
           }}
           article {{
             border: 1px solid #253044;
@@ -280,6 +338,12 @@ def dashboard() -> str:
         </header>
         <main>
           {empty_state}
+          {portfolio_overview}
+          {change_overview}
+          <div class="section-title">
+            <h2>Filings</h2>
+            <span>Source documents and parsed tables</span>
+          </div>
           <section class="feed">{rows}</section>
         </main>
         <script>
@@ -309,6 +373,104 @@ def dashboard() -> str:
         </script>
       </body>
     </html>
+    """
+
+
+def _latest_filing_with_holdings(filings: list[dict[str, str | None]]) -> dict[str, str | None] | None:
+    for filing in filings:
+        if int(filing.get("holdings_count") or 0) > 0:
+            return filing
+    return None
+
+
+def _portfolio_overview_section(filing: dict[str, str | None] | None) -> str:
+    if filing is None:
+        return ""
+    accession = filing.get("accession_number")
+    if not accession:
+        return ""
+    holdings = store.list_holdings(accession)
+    total_value = int(filing.get("holdings_total_value") or 0)
+    rows = "".join(_position_card(holding, total_value) for holding in holdings[:18])
+    report_date = filing.get("report_date") or filing.get("filing_date") or ""
+    return f"""
+    <div class="section-title">
+      <h2>Latest Portfolio</h2>
+      <span>{_escape(report_date)} / {len(holdings)} rows / {_money(total_value)}</span>
+    </div>
+    <section class="portfolio-grid">{rows}</section>
+    """
+
+
+def _change_overview_section(filing: dict[str, str | None] | None) -> str:
+    if filing is None:
+        return ""
+    accession = filing.get("accession_number")
+    if not accession:
+        return ""
+    holdings = _holdings_with_changes(accession)
+    notable = sorted(
+        [
+            holding
+            for holding in holdings
+            if str(holding.get("change") or "").startswith(("NEW", "INCREASED", "REDUCED"))
+        ],
+        key=_change_sort_key,
+    )[:18]
+    if not notable:
+        return ""
+    rows = "".join(_position_card(holding, int(filing.get("holdings_total_value") or 0), show_change=True) for holding in notable)
+    return f"""
+    <div class="section-title">
+      <h2>Latest Changes</h2>
+      <span>Compared with previous 13F</span>
+    </div>
+    <section class="change-grid">{rows}</section>
+    """
+
+
+def _change_sort_key(holding: dict[str, object]) -> tuple[int, int]:
+    change = str(holding.get("change") or "")
+    put_call = holding.get("put_call")
+    value = int(holding.get("value") or 0)
+    if change == "NEW" and not put_call:
+        bucket = 0
+    elif change.startswith("INCREASED") and not put_call:
+        bucket = 1
+    elif change.startswith("REDUCED") and not put_call:
+        bucket = 2
+    elif change == "NEW":
+        bucket = 3
+    elif change.startswith("INCREASED"):
+        bucket = 4
+    else:
+        bucket = 5
+    return (bucket, -value)
+
+
+def _position_card(
+    holding: dict[str, object],
+    total_value: int,
+    show_change: bool = False,
+) -> str:
+    value = int(holding.get("value") or 0)
+    percent = value / total_value * 100 if total_value else 0
+    put_call = str(holding.get("put_call") or "Long")
+    change = str(holding.get("change") or "")
+    change_html = f'<span class="change {_change_class(change)}">{_escape(change)}</span>' if show_change else ""
+    return f"""
+    <article class="position-card">
+      <div class="position-top">
+        <div class="position-name">{_escape(str(holding.get("name_of_issuer") or ""))}</div>
+        <div class="position-value">{_money(value)}</div>
+      </div>
+      <div class="position-meta">
+        {percent:.1f}% / {int(holding.get("shares_or_principal") or 0):,} {holding.get("share_type") or ""}
+        / {put_call}
+        / CUSIP {_escape(str(holding.get("cusip") or ""))}
+        {change_html}
+      </div>
+    </article>
     """
 
 
@@ -389,11 +551,7 @@ def _select_display_holdings(holdings: list[dict[str, object]]) -> list[dict[str
 
 def _holding_row(holding: dict[str, object]) -> str:
     change = str(holding.get("change") or "")
-    change_class = "unchanged"
-    if change.startswith("NEW") or change.startswith("INCREASED"):
-        change_class = "increased"
-    elif change.startswith("REDUCED") or change.startswith("EXITED"):
-        change_class = "reduced"
+    change_class = _change_class(change)
 
     put_call = holding.get("put_call") or "Long"
     return f"""
@@ -408,6 +566,14 @@ def _holding_row(holding: dict[str, object]) -> str:
       </div>
     </div>
     """
+
+
+def _change_class(change: str) -> str:
+    if change.startswith("NEW") or change.startswith("INCREASED"):
+        return "increased"
+    if change.startswith("REDUCED") or change.startswith("EXITED"):
+        return "reduced"
+    return "unchanged"
 
 
 def _holdings_with_changes(accession_number: str) -> list[dict[str, object]]:
