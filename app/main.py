@@ -22,6 +22,13 @@ def api_filings() -> list[dict[str, str | None]]:
     return store.list_filings()
 
 
+@app.get("/api/filings/{accession_number}/holdings")
+def api_holdings(accession_number: str) -> list[dict[str, object]]:
+    if store.get_filing(accession_number) is None:
+        raise HTTPException(status_code=404, detail="Filing not found")
+    return _holdings_with_changes(accession_number)
+
+
 @app.post("/api/poll")
 async def api_poll() -> dict[str, object]:
     service = PollService(settings, store)
@@ -202,6 +209,59 @@ def dashboard() -> str:
           .analysis.pending {{
             color: #94a3b8;
           }}
+          .holdings {{
+            margin-top: 12px;
+            border-top: 1px solid #253044;
+            padding-top: 12px;
+          }}
+          .holdings-title {{
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            color: #f8fafc;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 8px;
+          }}
+          .holding-row {{
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 6px 10px;
+            padding: 8px 0;
+            border-top: 1px solid #1f2937;
+          }}
+          .holding-row:first-of-type {{
+            border-top: 0;
+          }}
+          .issuer {{
+            font-size: 13px;
+            font-weight: 650;
+            color: #e2e8f0;
+            overflow-wrap: anywhere;
+          }}
+          .holding-meta {{
+            grid-column: 1 / -1;
+            color: #94a3b8;
+            font-size: 12px;
+          }}
+          .holding-value {{
+            text-align: right;
+            font-size: 13px;
+            color: #c7d2fe;
+            white-space: nowrap;
+          }}
+          .change {{
+            display: inline-block;
+            margin-left: 6px;
+            color: #34d399;
+            font-weight: 700;
+          }}
+          .change.reduced {{
+            color: #fb7185;
+          }}
+          .change.unchanged {{
+            color: #94a3b8;
+          }}
         </style>
       </head>
       <body>
@@ -255,6 +315,7 @@ def dashboard() -> str:
 def _filing_card(row: dict[str, str | None]) -> str:
     accepted = row.get("accepted_at") or row.get("filing_date") or "Unknown"
     analysis = _analysis_section(row)
+    holdings = _holdings_section(row)
     return f"""
     <article>
       <div class="card-top">
@@ -269,9 +330,132 @@ def _filing_card(row: dict[str, str | None]) -> str:
         <dt>Confidence</dt><dd>{_escape(row.get("confidence"))}</dd>
         <dt>Source</dt><dd><a href="{_escape(row.get("sec_url"))}" target="_blank" rel="noreferrer">SEC filing</a></dd>
       </dl>
+      {holdings}
       {analysis}
     </article>
     """
+
+
+def _holdings_section(row: dict[str, str | None]) -> str:
+    accession = row.get("accession_number")
+    holdings_count = int(row.get("holdings_count") or 0)
+    if not accession or holdings_count == 0:
+        return ""
+
+    holdings = _select_display_holdings(_holdings_with_changes(accession))
+    rendered = "".join(_holding_row(holding) for holding in holdings)
+    total_value = int(row.get("holdings_total_value") or 0)
+    return f"""
+    <div class="holdings">
+      <div class="holdings-title">
+        <span>Top / notable holdings</span>
+        <span>{holdings_count} rows / {_money(total_value)}</span>
+      </div>
+      {rendered}
+    </div>
+    """
+
+
+def _select_display_holdings(holdings: list[dict[str, object]]) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(holding: dict[str, object]) -> None:
+        key = _holding_key(holding)
+        if key in seen:
+            return
+        seen.add(key)
+        selected.append(holding)
+
+    for holding in holdings[:10]:
+        add(holding)
+
+    new_longs = [
+        holding
+        for holding in holdings
+        if holding.get("change") == "NEW" and not holding.get("put_call")
+    ]
+    for holding in new_longs[:10]:
+        add(holding)
+
+    important_names = ("T1 ENERGY", "BLOOM ENERGY", "COREWEAVE", "CORE SCIENTIFIC", "APPLIED DIGITAL")
+    for holding in holdings:
+        issuer = str(holding.get("name_of_issuer") or "").upper()
+        if any(name in issuer for name in important_names):
+            add(holding)
+
+    return selected[:22]
+
+
+def _holding_row(holding: dict[str, object]) -> str:
+    change = str(holding.get("change") or "")
+    change_class = "unchanged"
+    if change.startswith("NEW") or change.startswith("INCREASED"):
+        change_class = "increased"
+    elif change.startswith("REDUCED") or change.startswith("EXITED"):
+        change_class = "reduced"
+
+    put_call = holding.get("put_call") or "Long"
+    return f"""
+    <div class="holding-row">
+      <div class="issuer">{_escape(str(holding.get("name_of_issuer") or ""))}</div>
+      <div class="holding-value">{_money(int(holding.get("value") or 0))}</div>
+      <div class="holding-meta">
+        {int(holding.get("shares_or_principal") or 0):,} {holding.get("share_type") or ""}
+        / {put_call}
+        / CUSIP {_escape(str(holding.get("cusip") or ""))}
+        <span class="change {change_class}">{_escape(change)}</span>
+      </div>
+    </div>
+    """
+
+
+def _holdings_with_changes(accession_number: str) -> list[dict[str, object]]:
+    current = store.list_holdings(accession_number)
+    previous_accession = store.previous_filing_accession(accession_number)
+    previous = store.list_holdings(previous_accession) if previous_accession else []
+    previous_by_key = {_holding_key(holding): holding for holding in previous}
+    enriched: list[dict[str, object]] = []
+    for holding in current:
+        previous_holding = previous_by_key.get(_holding_key(holding))
+        enriched_holding = dict(holding)
+        enriched_holding["change"] = _holding_change(holding, previous_holding)
+        enriched.append(enriched_holding)
+    return enriched
+
+
+def _holding_key(holding: dict[str, object]) -> tuple[str, str]:
+    return (
+        str(holding.get("cusip") or ""),
+        str(holding.get("put_call") or "Long"),
+    )
+
+
+def _holding_change(
+    current: dict[str, object],
+    previous: dict[str, object] | None,
+) -> str:
+    current_value = int(current.get("value") or 0)
+    if previous is None:
+        return "NEW"
+    previous_value = int(previous.get("value") or 0)
+    if previous_value == current_value:
+        return "UNCHANGED"
+    delta = current_value - previous_value
+    percent = abs(delta) / previous_value * 100 if previous_value else 0
+    if delta > 0:
+        return f"INCREASED {percent:.0f}%"
+    return f"REDUCED {percent:.0f}%"
+
+
+def _money(value: int) -> str:
+    if value >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"${value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"${value / 1_000:.1f}K"
+    return f"${value:,}"
 
 
 def _analysis_section(row: dict[str, str | None]) -> str:

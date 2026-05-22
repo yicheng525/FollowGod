@@ -33,6 +33,22 @@ CREATE TABLE IF NOT EXISTS filing_analyses (
     analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(accession_number) REFERENCES filings(accession_number)
 );
+
+CREATE TABLE IF NOT EXISTS holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    accession_number TEXT NOT NULL,
+    name_of_issuer TEXT NOT NULL,
+    title_of_class TEXT NOT NULL,
+    cusip TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    shares_or_principal INTEGER NOT NULL,
+    share_type TEXT NOT NULL,
+    put_call TEXT,
+    FOREIGN KEY(accession_number) REFERENCES filings(accession_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_holdings_accession ON holdings(accession_number);
+CREATE INDEX IF NOT EXISTS idx_holdings_cusip ON holdings(cusip);
 """
 
 
@@ -106,15 +122,101 @@ class FilingStore:
                     a.parsed_facts_json AS analysis_parsed_facts_json,
                     a.model AS analysis_model,
                     a.error AS analysis_error,
-                    a.analyzed_at AS analyzed_at
+                    a.analyzed_at AS analyzed_at,
+                    COUNT(h.id) AS holdings_count,
+                    COALESCE(SUM(h.value), 0) AS holdings_total_value
                 FROM filings f
                 LEFT JOIN filing_analyses a ON a.accession_number = f.accession_number
+                LEFT JOIN holdings h ON h.accession_number = f.accession_number
+                GROUP BY f.accession_number
                 ORDER BY COALESCE(f.accepted_at, f.filing_date) DESC, f.inserted_at DESC
                 LIMIT ?
                 """,
                 (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def insert_holdings(self, accession_number: str, holdings: list[object]) -> int:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM holdings WHERE accession_number = ?", (accession_number,))
+            connection.executemany(
+                """
+                INSERT INTO holdings (
+                    accession_number,
+                    name_of_issuer,
+                    title_of_class,
+                    cusip,
+                    value,
+                    shares_or_principal,
+                    share_type,
+                    put_call
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        accession_number,
+                        holding.name_of_issuer,
+                        holding.title_of_class,
+                        holding.cusip,
+                        holding.value,
+                        holding.shares_or_principal,
+                        holding.share_type,
+                        holding.put_call,
+                    )
+                    for holding in holdings
+                ],
+            )
+        return len(holdings)
+
+    def holdings_count(self, accession_number: str) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM holdings WHERE accession_number = ?",
+                (accession_number,),
+            ).fetchone()
+        return int(row["count"])
+
+    def list_holdings(self, accession_number: str) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    name_of_issuer,
+                    title_of_class,
+                    cusip,
+                    value,
+                    shares_or_principal,
+                    share_type,
+                    put_call
+                FROM holdings
+                WHERE accession_number = ?
+                ORDER BY value DESC
+                """,
+                (accession_number,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def previous_filing_accession(self, accession_number: str) -> str | None:
+        filing = self.get_filing(accession_number)
+        if filing is None:
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT accession_number
+                FROM filings
+                WHERE form LIKE '13F%%'
+                  AND accession_number != ?
+                  AND COALESCE(report_date, filing_date) < COALESCE(?, ?)
+                ORDER BY COALESCE(report_date, filing_date) DESC
+                LIMIT 1
+                """,
+                (accession_number, filing.report_date, filing.filing_date),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["accession_number"])
 
     def get_filing(self, accession_number: str) -> Filing | None:
         with self._connect() as connection:

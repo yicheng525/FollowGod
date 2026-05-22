@@ -48,6 +48,27 @@ class SecArchiveClient:
             "text": "\n\n".join(parts),
         }
 
+    async def fetch_13f_information_table(self, filing: Filing) -> str | None:
+        documents = await self._list_documents(filing)
+        candidates = [
+            document["name"]
+            for document in documents
+            if document["name"].lower().endswith(".xml")
+            and document["name"] != filing.primary_document
+        ]
+        if not candidates:
+            return None
+
+        async with httpx.AsyncClient(timeout=30.0, headers=self.headers) as client:
+            for name in candidates:
+                url = self._document_url(filing, name)
+                response = await client.get(url)
+                response.raise_for_status()
+                text = response.text
+                if "informationTable" in text and "infoTable" in text:
+                    return text
+        return None
+
     async def _list_documents(self, filing: Filing) -> list[dict[str, str]]:
         url = (
             "https://www.sec.gov/Archives/edgar/data/"
