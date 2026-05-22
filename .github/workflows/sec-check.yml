@@ -1,0 +1,56 @@
+name: SEC Check and Telegram Alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */12 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sec-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      FOLLOWGOD_TARGET_CIK: "0002045724"
+      FOLLOWGOD_TARGET_NAME: "Situational Awareness LP"
+      FOLLOWGOD_SEC_USER_AGENT: ${{ secrets.FOLLOWGOD_SEC_USER_AGENT || 'FollowGod/0.1 github-actions@example.com' }}
+      FOLLOWGOD_DATABASE_PATH: "github_action.sqlite3"
+      FOLLOWGOD_STATE_PATH: "data/notified_accessions.json"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      FOLLOWGOD_OPENAI_MODEL: ${{ vars.FOLLOWGOD_OPENAI_MODEL || 'gpt-5-mini' }}
+      FOLLOWGOD_TELEGRAM_BOT_TOKEN: ${{ secrets.FOLLOWGOD_TELEGRAM_BOT_TOKEN }}
+      FOLLOWGOD_TELEGRAM_CHAT_ID: ${{ secrets.FOLLOWGOD_TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check SEC and notify Telegram
+        run: python scripts/check_and_notify.py
+
+      - name: Commit updated notification state
+        run: |
+          if git diff --quiet -- data/notified_accessions.json; then
+            echo "No state changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/notified_accessions.json
+          git commit -m "Update notified SEC accessions"
+          git push

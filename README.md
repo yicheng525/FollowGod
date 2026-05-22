@@ -122,6 +122,38 @@ python .\scripts\poll_once.py
 
 When a new tracked SEC filing is detected, the bot sends a message with filing type, accepted time, accession number, and the SEC source link.
 
+## GitHub Actions scheduled alerts
+
+The repository includes `.github/workflows/sec-check.yml`.
+
+It runs:
+
+- manually via `workflow_dispatch`
+- automatically every 12 hours via cron
+
+Add these GitHub repository secrets:
+
+```text
+FOLLOWGOD_SEC_USER_AGENT=FollowGod/0.1 your-email@example.com
+OPENAI_API_KEY=sk-...
+FOLLOWGOD_TELEGRAM_BOT_TOKEN=...
+FOLLOWGOD_TELEGRAM_CHAT_ID=...
+```
+
+Optional repository variable:
+
+```text
+FOLLOWGOD_OPENAI_MODEL=gpt-5-mini
+```
+
+The workflow stores notification state in:
+
+```text
+data/notified_accessions.json
+```
+
+Current historical filings are already seeded into that file so the first scheduled run does not spam old filings.
+
 ## Useful API endpoints
 
 - `GET /health`
