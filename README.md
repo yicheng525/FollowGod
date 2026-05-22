@@ -6,6 +6,7 @@ SEC-first investment tracking MVP focused on accuracy, source links, and fast mo
 
 - Polls SEC submissions for one configured CIK.
 - Stores tracked filings in SQLite.
+- Optionally downloads new filing documents and creates an AI summary.
 - Shows a mobile-friendly dashboard at `/`.
 - Sends optional Telegram alerts when a new tracked filing appears.
 - Deduplicates alerts by SEC accession number.
@@ -38,6 +39,30 @@ FOLLOWGOD_SEC_USER_AGENT=FollowGod/0.1 your-email@example.com
 ```
 
 SEC asks automated clients to send a descriptive User-Agent with contact info. Use an email you actually check.
+
+## Optional AI filing reader
+
+Add this to `.env`:
+
+```text
+OPENAI_API_KEY=sk-...
+FOLLOWGOD_OPENAI_MODEL=gpt-5-mini
+```
+
+When AI is enabled, new filings are downloaded from SEC, summarized once, and saved in SQLite. The same filing will not be analyzed repeatedly unless you force a retry.
+
+Manual analysis endpoint:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/analyze/0002045724-26-000008?force=true"
+```
+
+Cost control:
+
+- AI only runs for filings stored by this tracker.
+- The app sends trimmed filing text, not an unlimited document dump.
+- Results are cached in SQLite.
+- If `OPENAI_API_KEY` is empty, the app still works and marks AI as off.
 
 ## Run once and verify data
 
@@ -102,6 +127,7 @@ When a new tracked SEC filing is detected, the bot sends a message with filing t
 - `GET /health`
 - `GET /api/filings`
 - `POST /api/poll`
+- `POST /api/analyze/{accession_number}`
 
 ## Accuracy notes
 

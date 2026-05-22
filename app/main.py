@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from app.config import get_settings
@@ -28,6 +28,14 @@ async def api_poll() -> dict[str, object]:
     return await service.poll_once()
 
 
+@app.post("/api/analyze/{accession_number}")
+async def api_analyze(accession_number: str, force: bool = False) -> dict[str, object]:
+    if store.get_filing(accession_number) is None:
+        raise HTTPException(status_code=404, detail="Filing not found")
+    service = PollService(settings, store)
+    return await service.analyze_filing(accession_number, force=force)
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     filings = store.list_filings(limit=100)
@@ -42,6 +50,7 @@ def dashboard() -> str:
         """
 
     telegram_status = "On" if settings.telegram_bot_token and settings.telegram_chat_id else "Off"
+    ai_status = "On" if settings.openai_api_key else "Off"
     return f"""
     <!doctype html>
     <html lang="en">
@@ -166,6 +175,33 @@ def dashboard() -> str:
           code {{
             color: #fbbf24;
           }}
+          .analysis {{
+            margin-top: 12px;
+            border-top: 1px solid #253044;
+            padding-top: 12px;
+          }}
+          .analysis-title {{
+            color: #fbbf24;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+          }}
+          .analysis p {{
+            margin: 0 0 8px;
+            color: #dbeafe;
+            font-size: 13px;
+            line-height: 1.45;
+          }}
+          .analysis ul {{
+            margin: 0;
+            padding-left: 18px;
+            color: #e2e8f0;
+            font-size: 13px;
+            line-height: 1.45;
+          }}
+          .analysis.pending {{
+            color: #94a3b8;
+          }}
         </style>
       </head>
       <body>
@@ -173,6 +209,7 @@ def dashboard() -> str:
           <h1>FollowGod SEC Tracker</h1>
           <div class="meta">
             <span class="pill">CIK {settings.normalized_cik}</span>
+            <span class="pill">AI {ai_status}</span>
             <span class="pill">Telegram {telegram_status}</span>
             <span class="pill">{len(filings)} stored filings</span>
           </div>
@@ -200,6 +237,15 @@ def dashboard() -> str:
               button.textContent = "Poll SEC";
             }}
           }}
+          async function analyzeFiling(accession, force = false) {{
+            const suffix = force ? "?force=true" : "";
+            const response = await fetch(`/api/analyze/${{accession}}${{suffix}}`, {{ method: "POST" }});
+            if (!response.ok) {{
+              alert(await response.text());
+              return;
+            }}
+            location.reload();
+          }}
         </script>
       </body>
     </html>
@@ -208,6 +254,7 @@ def dashboard() -> str:
 
 def _filing_card(row: dict[str, str | None]) -> str:
     accepted = row.get("accepted_at") or row.get("filing_date") or "Unknown"
+    analysis = _analysis_section(row)
     return f"""
     <article>
       <div class="card-top">
@@ -222,8 +269,54 @@ def _filing_card(row: dict[str, str | None]) -> str:
         <dt>Confidence</dt><dd>{_escape(row.get("confidence"))}</dd>
         <dt>Source</dt><dd><a href="{_escape(row.get("sec_url"))}" target="_blank" rel="noreferrer">SEC filing</a></dd>
       </dl>
+      {analysis}
     </article>
     """
+
+
+def _analysis_section(row: dict[str, str | None]) -> str:
+    status = row.get("analysis_status")
+    accession = row.get("accession_number") or ""
+    if not status:
+        return f"""
+        <div class="analysis pending">
+          <div class="analysis-title">AI analysis pending</div>
+          <button onclick="analyzeFiling('{_escape(accession)}')">Analyze</button>
+        </div>
+        """
+    if status != "complete":
+        error = row.get("analysis_error") or "No analysis is available."
+        return f"""
+        <div class="analysis pending">
+          <div class="analysis-title">AI analysis {status}</div>
+          <p>{_escape(error)}</p>
+          <button onclick="analyzeFiling('{_escape(accession)}', true)">Retry</button>
+        </div>
+        """
+
+    key_points = _json_list(row.get("analysis_key_points_json"))
+    rendered_points = "".join(f"<li>{_escape(point)}</li>" for point in key_points)
+    return f"""
+    <div class="analysis">
+      <div class="analysis-title">AI Summary: {_escape(row.get("analysis_importance"))}</div>
+      <p>{_escape(row.get("analysis_summary"))}</p>
+      <ul>{rendered_points}</ul>
+    </div>
+    """
+
+
+def _json_list(value: str | None) -> list[str]:
+    import json
+
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed]
 
 
 def _escape(value: str | None) -> str:

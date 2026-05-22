@@ -14,9 +14,20 @@ class TelegramNotifier:
     def enabled(self) -> bool:
         return bool(self.bot_token and self.chat_id)
 
-    async def send_filing_alert(self, filing: Filing) -> None:
+    async def send_filing_alert(self, filing: Filing, analysis: dict[str, object] | None = None) -> None:
         if not self.enabled:
             return
+
+        summary = ""
+        if analysis and analysis.get("status") == "complete":
+            key_points = analysis.get("key_points") or []
+            rendered_points = "\n".join(f"- {point}" for point in key_points)
+            summary = (
+                "\n\nAI Summary:\n"
+                f"{analysis.get('summary')}\n"
+                f"Importance: {analysis.get('importance')}\n"
+                f"{rendered_points}"
+            )
 
         message = (
             "CRITICAL: New SEC Filing Detected\n\n"
@@ -25,6 +36,7 @@ class TelegramNotifier:
             f"Accepted: {filing.accepted_at or filing.filing_date}\n"
             f"Accession: {filing.accession_number}\n"
             f"Confidence: {filing.confidence}\n"
+            f"{summary}\n"
             f"Source: {filing.sec_url}"
         )
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"

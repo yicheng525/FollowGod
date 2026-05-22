@@ -36,7 +36,7 @@ This document outlines the system architecture, data ingestion strategy, and tec
 * **Payload Example:**
 ```json
 {
-  "title": "? LEOPOLD ASCHENBRENNER NEW POSITION DETECTED",
+  "title": "🚨 LEOPOLD ASCHENBRENNER NEW POSITION DETECTED",
   "body": "Situational Awareness LP disclosed a massive position in T1 Energy ($TE): 10,000,000 shares valued at ~$43.9M. Tap to view updated portfolio allocation.",
   "data": {
     "ticker": "TE",
