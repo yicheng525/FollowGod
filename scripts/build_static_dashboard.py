@@ -224,6 +224,9 @@ def _render_page(
         font-size: 12px;
         line-height: 1.45;
       }}
+      .timing {{
+        color: #cbd5e1;
+      }}
       .change {{
         display: inline-block;
         margin-left: 6px;
@@ -421,6 +424,7 @@ def _position_card(
     exposure_type = holding.get("put_call") or "Long"
     exposure_class = str(exposure_type).lower()
     bar_width = max(1.5, min(100, percent))
+    timing = _timing_line(holding, show_change)
     return f"""
     <article class="position-card {exposure_class}">
       <div class="position-top">
@@ -433,9 +437,31 @@ def _position_card(
         / CUSIP {_escape(str(holding.get("cusip") or ""))}
         {change_html}
       </div>
+      {timing}
       <div class="bar"><div class="bar-fill" style="width: {bar_width:.2f}%"></div></div>
     </article>
     """
+
+
+def _timing_line(holding: dict[str, object], show_change: bool) -> str:
+    report_date = holding.get("change_report_date")
+    filing_date = holding.get("change_filing_date")
+    accepted_at = holding.get("change_accepted_at")
+    previous_report_date = holding.get("previous_report_date")
+    if not report_date and not filing_date:
+        return ""
+
+    if show_change:
+        previous = f" vs previous {previous_report_date}" if previous_report_date else ""
+        text = f"Change period: {report_date or 'N/A'}{previous}"
+    else:
+        text = f"As of: {report_date or 'N/A'}"
+
+    if filing_date:
+        text += f" / filed {filing_date}"
+    if accepted_at:
+        text += f" / accepted {accepted_at}"
+    return f'<div class="subtext timing">{_escape(text)}</div>'
 
 
 def _filing_card(filing: dict[str, object]) -> str:
@@ -464,8 +490,10 @@ def _latest_filing_with_holdings(filings: list[dict[str, object]]) -> dict[str, 
 def _holdings_with_changes(accession_number: str) -> list[dict[str, object]]:
     settings = get_settings()
     store = FilingStore(settings.database_path)
+    filing = store.get_filing(accession_number)
     current = store.list_holdings(accession_number)
     previous_accession = store.previous_filing_accession(accession_number)
+    previous_filing = store.get_filing(previous_accession) if previous_accession else None
     previous = store.list_holdings(previous_accession) if previous_accession else []
     previous_by_key = {_holding_key(holding): holding for holding in previous}
     enriched: list[dict[str, object]] = []
@@ -473,6 +501,10 @@ def _holdings_with_changes(accession_number: str) -> list[dict[str, object]]:
         previous_holding = previous_by_key.get(_holding_key(holding))
         item = dict(holding)
         item["change"] = _holding_change(holding, previous_holding)
+        item["change_report_date"] = filing.report_date if filing else None
+        item["change_filing_date"] = filing.filing_date if filing else None
+        item["change_accepted_at"] = filing.accepted_at if filing else None
+        item["previous_report_date"] = previous_filing.report_date if previous_filing else None
         enriched.append(item)
     return enriched
 
