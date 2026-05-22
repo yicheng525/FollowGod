@@ -34,6 +34,7 @@ jobs:
       FOLLOWGOD_TARGET_NAME: "Situational Awareness LP"
       FOLLOWGOD_SEC_USER_AGENT: ${{ secrets.FOLLOWGOD_SEC_USER_AGENT || 'FollowGod/0.1 github-actions@example.com' }}
       FOLLOWGOD_DATABASE_PATH: "github_action.sqlite3"
+      FOLLOWGOD_DASHBOARD_URL: "https://yicheng525.github.io/FollowGod/"
       FOLLOWGOD_STATE_PATH: "data/notified_accessions.json"
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       FOLLOWGOD_OPENAI_MODEL: ${{ vars.FOLLOWGOD_OPENAI_MODEL || 'gpt-5-mini' }}

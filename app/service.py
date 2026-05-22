@@ -17,7 +17,11 @@ class PollService:
         self.sec_client = SecClient(settings.sec_user_agent)
         self.archive_client = SecArchiveClient(settings.sec_user_agent)
         self.ai_reader = AiFilingReader(settings.openai_api_key, settings.openai_model)
-        self.notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+        self.notifier = TelegramNotifier(
+            settings.telegram_bot_token,
+            settings.telegram_chat_id,
+            settings.dashboard_url,
+        )
 
     async def poll_once(self) -> dict[str, object]:
         filings = await self.sec_client.fetch_recent_filings(self.settings.normalized_cik)

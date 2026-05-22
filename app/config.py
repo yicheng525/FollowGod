@@ -15,6 +15,10 @@ class Settings(BaseSettings):
         alias="FOLLOWGOD_SEC_USER_AGENT",
     )
     database_path: Path = Field(default=Path("followgod.sqlite3"), alias="FOLLOWGOD_DATABASE_PATH")
+    dashboard_url: str = Field(
+        default="https://yicheng525.github.io/FollowGod/",
+        alias="FOLLOWGOD_DASHBOARD_URL",
+    )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-5-mini", alias="FOLLOWGOD_OPENAI_MODEL")
     telegram_bot_token: str | None = Field(default=None, alias="FOLLOWGOD_TELEGRAM_BOT_TOKEN")

@@ -50,7 +50,7 @@ def api_notification_preview(accession_number: str) -> dict[str, str]:
     if filing is None:
         raise HTTPException(status_code=404, detail="Filing not found")
     analysis = store.get_analysis(accession_number)
-    return {"message": build_filing_alert_message(filing, analysis)}
+    return {"message": build_filing_alert_message(filing, analysis, settings.dashboard_url)}
 
 
 @app.get("/", response_class=HTMLResponse)

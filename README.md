@@ -36,6 +36,7 @@ Edit `.env`:
 ```text
 FOLLOWGOD_TARGET_CIK=PUT_THE_REAL_CIK_HERE
 FOLLOWGOD_SEC_USER_AGENT=FollowGod/0.1 your-email@example.com
+FOLLOWGOD_DASHBOARD_URL=https://yicheng525.github.io/FollowGod/
 ```
 
 SEC asks automated clients to send a descriptive User-Agent with contact info. Use an email you actually check.
