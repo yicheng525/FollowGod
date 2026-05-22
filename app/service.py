@@ -100,9 +100,106 @@ class PollService:
 
         try:
             reader_input = await self.archive_client.build_reader_input(filing)
-            analysis = await self.ai_reader.analyze(filing, reader_input)
+            holdings_context = self.build_holdings_context(filing.accession_number)
+            analysis = await self.ai_reader.analyze(filing, reader_input, holdings_context)
         except Exception as exc:  # noqa: BLE001
             analysis = {"status": "error", "error": str(exc), "model": self.settings.openai_model}
 
         self.store.save_analysis(accession_number, analysis)
         return analysis
+
+    def build_holdings_context(self, accession_number: str) -> str:
+        holdings = self.store.list_holdings(accession_number)
+        if not holdings:
+            return ""
+
+        previous_accession = self.store.previous_filing_accession(accession_number)
+        previous = self.store.list_holdings(previous_accession) if previous_accession else []
+        previous_by_key = {_holding_key(holding): holding for holding in previous}
+
+        enriched: list[dict[str, object]] = []
+        for holding in holdings:
+            current = dict(holding)
+            previous_holding = previous_by_key.get(_holding_key(holding))
+            current["change"] = _holding_change(holding, previous_holding)
+            enriched.append(current)
+
+        total_value = sum(int(holding.get("value") or 0) for holding in enriched)
+        top_holdings = sorted(enriched, key=lambda item: int(item.get("value") or 0), reverse=True)[:15]
+        changed_holdings = sorted(enriched, key=_change_sort_key)[:20]
+
+        lines = [
+            f"Total rows: {len(enriched)}",
+            f"Total reported value: {_money(total_value)}",
+            "Top holdings by reported value:",
+        ]
+        lines.extend(_holding_line(holding, total_value) for holding in top_holdings)
+        lines.append("Most relevant changes versus previous 13F:")
+        lines.extend(_holding_line(holding, total_value, include_change=True) for holding in changed_holdings)
+        return "\n".join(lines)
+
+
+def _holding_key(holding: dict[str, object]) -> tuple[str, str]:
+    return (
+        str(holding.get("cusip") or ""),
+        str(holding.get("put_call") or "Long"),
+    )
+
+
+def _holding_change(
+    current: dict[str, object],
+    previous: dict[str, object] | None,
+) -> str:
+    current_value = int(current.get("value") or 0)
+    if previous is None:
+        return "NEW"
+    previous_value = int(previous.get("value") or 0)
+    if previous_value == current_value:
+        return "UNCHANGED"
+    delta = current_value - previous_value
+    percent = abs(delta) / previous_value * 100 if previous_value else 0
+    if delta > 0:
+        return f"INCREASED {percent:.0f}%"
+    return f"REDUCED {percent:.0f}%"
+
+
+def _change_sort_key(holding: dict[str, object]) -> tuple[int, int]:
+    change = str(holding.get("change") or "")
+    put_call = holding.get("put_call")
+    value = int(holding.get("value") or 0)
+    if change == "NEW" and not put_call:
+        bucket = 0
+    elif change.startswith("INCREASED") and not put_call:
+        bucket = 1
+    elif change.startswith("REDUCED") and not put_call:
+        bucket = 2
+    elif change == "NEW":
+        bucket = 3
+    elif change.startswith("INCREASED"):
+        bucket = 4
+    else:
+        bucket = 5
+    return (bucket, -value)
+
+
+def _holding_line(holding: dict[str, object], total_value: int, include_change: bool = False) -> str:
+    value = int(holding.get("value") or 0)
+    percent = value / total_value * 100 if total_value else 0
+    exposure_type = holding.get("put_call") or "Long"
+    change = f", change={holding.get('change')}" if include_change else ""
+    return (
+        f"- {holding.get('name_of_issuer')} ({exposure_type}): "
+        f"value={_money(value)}, weight={percent:.1f}%, "
+        f"shares/principal={int(holding.get('shares_or_principal') or 0):,}, "
+        f"CUSIP={holding.get('cusip')}{change}"
+    )
+
+
+def _money(value: int) -> str:
+    if value >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"${value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"${value / 1_000:.1f}K"
+    return f"${value:,}"

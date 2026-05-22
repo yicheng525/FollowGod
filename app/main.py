@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
 from app.config import get_settings
+from app.notifier import build_filing_alert_message
 from app.service import PollService
 from app.storage import FilingStore
 
@@ -41,6 +42,15 @@ async def api_analyze(accession_number: str, force: bool = False) -> dict[str, o
         raise HTTPException(status_code=404, detail="Filing not found")
     service = PollService(settings, store)
     return await service.analyze_filing(accession_number, force=force)
+
+
+@app.get("/api/filings/{accession_number}/notification-preview")
+def api_notification_preview(accession_number: str) -> dict[str, str]:
+    filing = store.get_filing(accession_number)
+    if filing is None:
+        raise HTTPException(status_code=404, detail="Filing not found")
+    analysis = store.get_analysis(accession_number)
+    return {"message": build_filing_alert_message(filing, analysis)}
 
 
 @app.get("/", response_class=HTMLResponse)

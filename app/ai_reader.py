@@ -56,7 +56,12 @@ class AiFilingReader:
     def enabled(self) -> bool:
         return bool(self.api_key)
 
-    async def analyze(self, filing: Filing, reader_input: dict[str, object]) -> dict[str, object]:
+    async def analyze(
+        self,
+        filing: Filing,
+        reader_input: dict[str, object],
+        holdings_context: str = "",
+    ) -> dict[str, object]:
         if not self.enabled:
             return {
                 "status": "skipped",
@@ -70,13 +75,15 @@ class AiFilingReader:
                 "error": "No readable SEC document text was found.",
             }
 
-        prompt = _build_prompt(filing, reader_input, filing_text)
+        prompt = _build_prompt(filing, reader_input, filing_text, holdings_context)
         payload = {
             "model": self.model,
             "instructions": (
                 "You are a careful SEC filing analyst. Use only the supplied filing text. "
                 "Do not infer trades that are not present. If a fact is missing, say it is not available. "
-                "Keep the summary concise and useful for a mobile alert."
+                "Write summary and key_points in Traditional Chinese. "
+                "Keep the result concise and useful for a mobile push notification. "
+                "Prioritize what the fund holds, what appears new, and what changed."
             ),
             "input": prompt,
             "text": {
@@ -108,7 +115,12 @@ class AiFilingReader:
         return analysis
 
 
-def _build_prompt(filing: Filing, reader_input: dict[str, object], filing_text: str) -> str:
+def _build_prompt(
+    filing: Filing,
+    reader_input: dict[str, object],
+    filing_text: str,
+    holdings_context: str,
+) -> str:
     return f"""
 SEC filing metadata:
 - Entity: {filing.entity_name}
@@ -122,11 +134,16 @@ SEC filing metadata:
 - Readable documents: {reader_input.get("readable_documents")}
 - Skipped documents: {reader_input.get("skipped_documents")}
 
-Analyze the filing for an investor tracking this entity. Focus on:
-- what the filing says,
-- whether it suggests a new position, changed position, ownership disclosure, or routine filing,
-- securities/tickers/names explicitly visible,
-- limitations from the supplied text.
+Parsed holdings/change context from deterministic parser:
+{holdings_context or "No parsed holdings context available."}
+
+Analyze the filing for an investor tracking this entity. The output should answer:
+- 這次最重要的持倉是什麼？
+- 有哪些新增、加碼、減碼？
+- 這比較像多頭持倉、選擇權 hedge，還是例行揭露？
+- 哪些地方需要注意 SEC 13F 的限制？
+
+Do not call a Put position a direct long stock purchase. Clearly label Long, Put, and Call.
 
 Filing text:
 {filing_text}

@@ -18,27 +18,7 @@ class TelegramNotifier:
         if not self.enabled:
             return
 
-        summary = ""
-        if analysis and analysis.get("status") == "complete":
-            key_points = analysis.get("key_points") or []
-            rendered_points = "\n".join(f"- {point}" for point in key_points)
-            summary = (
-                "\n\nAI Summary:\n"
-                f"{analysis.get('summary')}\n"
-                f"Importance: {analysis.get('importance')}\n"
-                f"{rendered_points}"
-            )
-
-        message = (
-            "CRITICAL: New SEC Filing Detected\n\n"
-            f"Entity: {filing.entity_name}\n"
-            f"Filing: {filing.form}\n"
-            f"Accepted: {filing.accepted_at or filing.filing_date}\n"
-            f"Accession: {filing.accession_number}\n"
-            f"Confidence: {filing.confidence}\n"
-            f"{summary}\n"
-            f"Source: {filing.sec_url}"
-        )
+        message = build_filing_alert_message(filing, analysis)
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(
@@ -50,3 +30,30 @@ class TelegramNotifier:
                 },
             )
             response.raise_for_status()
+
+
+def build_filing_alert_message(
+    filing: Filing,
+    analysis: dict[str, object] | None = None,
+) -> str:
+    summary = ""
+    if analysis and analysis.get("status") == "complete":
+        key_points = analysis.get("key_points") or []
+        rendered_points = "\n".join(f"- {point}" for point in key_points)
+        summary = (
+            "\n\nAI 整理:\n"
+            f"{analysis.get('summary')}\n"
+            f"重要性: {analysis.get('importance')}\n"
+            f"{rendered_points}"
+        )
+    elif analysis and analysis.get("error"):
+        summary = f"\n\nAI 整理暫不可用: {analysis.get('error')}"
+
+    return (
+        "SEC 新資料\n\n"
+        f"{filing.entity_name} 提交 {filing.form}\n"
+        f"報告期: {filing.report_date or 'N/A'}\n"
+        f"SEC 接收: {filing.accepted_at or filing.filing_date}\n"
+        f"{summary}\n"
+        f"來源: {filing.sec_url}"
+    )
